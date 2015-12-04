@@ -1,0 +1,7 @@
+#!/bin/bash
+
+nowdate=$(date +%s)
+curl http://192.168.100.1/cmSignalData.htm -o /home/ed/Documents/CableModemStats/output/${nowdate}.htm
+cp /home/ed/Documents/CableModemStats/output/${nowdate}.htm /home/ed/Documents/CableModemStats/modemOutput/
+
+exit
