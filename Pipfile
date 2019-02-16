@@ -1,0 +1,6 @@
+[packages]
+lxml = "*"
+pandas = "*"
+
+[requires]
+python_version = "3.7"
