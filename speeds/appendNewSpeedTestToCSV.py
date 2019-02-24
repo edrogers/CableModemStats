@@ -9,7 +9,7 @@ modemFiles = glob.glob(dirName+"/*.txt")
 modemFiles.sort(key=os.path.getmtime)
 
 #all new data will be appended to a .csv file
-csvFileName='speeds.csv'
+csvFileName="{}/speeds.csv".format(dirName)
 csvFile=open(csvFileName,'a+')
 
 # failureFileName='failedParse.log'
