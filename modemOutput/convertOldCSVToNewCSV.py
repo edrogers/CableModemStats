@@ -8,8 +8,10 @@ from collections import OrderedDict
 
 import pandas as pd
 
-testCSV_old_file_name = "/home/ed/Documents/CableModemStats/testCSV.oldformat.csv"
-testCSV_old_conv_file_name = "/home/ed/Documents/CableModemStats/testCSV.oldformat.converted.csv"
+# testCSV_old_file_name = "/home/ed/Documents/CableModemStats/testCSV.oldformat.2.csv"
+# testCSV_old_conv_file_name = "/home/ed/Documents/CableModemStats/testCSV.oldformat.converted.csv"
+oldformat_csv_file_name = "/home/ed/Documents/CableModemStats/modemOutput/modemData.csv"
+newformat_csv_file_name = "/home/ed/Documents/CableModemStats/modemOutput/modemData.converted.csv"
 
 downstream_columns = [
     "Downstream: " + col_group + " " + let for col_group in [
@@ -57,12 +59,12 @@ signal_stat_columns = [
     ]
 ]
 
-test_df = pd.read_csv(testCSV_old_file_name, dtype=str, quotechar='\0',keep_default_na=False, header=None, low_memory=False)
+df = pd.read_csv(oldformat_csv_file_name, dtype=str, quotechar='\0',keep_default_na=False, header=None, low_memory=False)
 
 # Columns are named numerically by default. 
 
 # Gather columns 26-29 (inclusive) into a single column
-test_df["Upstream_Modulation_A"] = test_df.loc[:,26:29].apply(" ".join, axis=1)
+df["Upstream_Modulation_A"] = df.loc[:,26:29].apply(lambda x: " ".join(x) if any(x != "n/a") else "n/a", axis=1)
 
 # Now give each column a meaningful name
 column_renaming_mapping = {0: "timestamp"}
@@ -89,17 +91,18 @@ column_renaming_mapping.update(
     {k+31:v for (k, v) in enumerate(signal_stat_columns)}
 )
 
-test_df.rename(columns=column_renaming_mapping, inplace=True)
+df.rename(columns=column_renaming_mapping, inplace=True)
 
-# Reindex too add missing columns
-test_df = test_df.reindex(
+# Reindex to add missing columns
+df = df.reindex(
     columns=["timestamp"]
             +downstream_columns
             +upstream_columns
             +signal_stat_columns
 )
 
-test_df.to_csv(testCSV_old_conv_file_name, mode="w", index=False, header=False, quoting=csv.QUOTE_NONE, quotechar="",  escapechar="\\", na_rep="n/a")
+#test_df.to_csv(testCSV_old_conv_file_name, mode="w", index=False, header=False, quoting=csv.QUOTE_NONE, quotechar="",  escapechar="\\", na_rep="n/a")
+df.to_csv(newformat_csv_file_name, mode="w", index=False, header=True, quoting=csv.QUOTE_NONE, quotechar="",  escapechar="\\", na_rep="n/a")
 
 quit()
 
