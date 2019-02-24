@@ -1,5 +1,9 @@
+.env
+
 modemOutput/*.htm
 modemOutput/modemData.csv
+
 speeds/*.txt
 speeds/speeds.csv
+
 .Rhistory
