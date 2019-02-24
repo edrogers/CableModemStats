@@ -1,273 +1,230 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
+"""
+A script to take *.htm files that are currently on disk, extract the relevant
+content, and append as new rows in a CSV. After successful extraction,
+the files are then removed.
+"""
 
-import re, mmap
-import glob, os
+# This script successfully handles a directory full of both old and new *.htm
+# file formats, loading 1,000 htm files at a time, building a pandas DataFrame
+# (of shape (1000, 65)) from them, then appending them to the ongoing CSV of
+#  previous readings.
+#
+# NOTE: changes to versions in pandas, lxml, etc may cause changes in
+# the behavior of pd.read_html(). Be sure to sync a new virtualenv to
+# the included Pipfile.lock before using.
 
-#directory of timestamp-named HTM files directly from Cable Modem
-dirName="/home/ed/Documents/CableModemStats/modemOutput"
-modemFiles = glob.glob(dirName+"/*.htm")
+import csv
+import os
+import re
+import shutil
 
-#all new data will be appended to a .csv file
-csvFileName="{}/modemData.csv".format(dirName)
-csvFile=open(csvFileName,'a+')
+from collections import OrderedDict
+from glob import glob
 
-textFile=open('testOutput.txt','w+')
+import pandas as pd
 
-pHTMLBreaks=re.compile(r'<BR>')
-pDataTables=re.compile(r'<TABLE align')
-pElements=re.compile("[<>]")
-pNumberInBracesWithSpace=re.compile("\[[0-9]\] ")
-pUpstreamModulations=re.compile("\[[0-9]\] [0-9]+QAM")
+full_df_filename = (
+    "/home/ed/Documents/CableModemStats/modemOutput/modemData.csv"
+)
 
-#modemFiles = ["1431475081.htm","1431475381.htm","1431480361.htm"]
-for modemFile in modemFiles:
-    f=open(modemFile,'r+')
-    try:
+modem_files = glob("/home/ed/Documents/CableModemStats/modemOutput/*.htm")
+timestamp_re = re.compile(r"(\d+)")
 
-        lineToAppendToCSV=modemFile.replace("/home/ed/Documents/CableModemStats/modemOutput/","").replace(".htm","")+","
-       
-        #mmap prevents the fulltext from being pulled to memory all at once         
-        fulltext=mmap.mmap(f.fileno(),0)
+files_to_remove = []
 
-        fullTextNoBreaks=pHTMLBreaks.sub('',fulltext)
-       
-        dataTables=pDataTables.split(fullTextNoBreaks)
 
-        #discard the preamble
-        dataTables.pop(0)
+def get_timestamp_from_filename(filename):
+    return timestamp_re.findall(filename)[-1]
 
-        #things from the first table
-        downstreamChannelIDs=[]
-        downstreamFrequencies=[]
-        downstreamSigToNoises=[]
-        downstreamModulations=[]
-        downstreamPowerLevels=[]
-        #things from the second table
-        upstreamValues=[]
-        #things from the third table
-        signalStatsChannelIDs=[]
-        signalStatsUnerroreds=[]
-        signalStatsCorrectables=[]
-        signalStatsUncorrectables=[]
 
-        #parse the Downstream Table
-        #start by breaking the string at every "<" or ">"
-        # (many of these elements will just be HTML tags)
-        rawElements=pElements.split(dataTables[0])
-                     
-        #During outages, output can appear with two alternative
-        #structures. These are handled individually: 
-        if len(rawElements)==96:
-            #Zero connection information / Empty Tables
-            for i in range(4):
-                downstreamChannelIDs.append("n/a")
-                downstreamFrequencies.append("n/a")
-                downstreamSigToNoises.append("n/a")
-                downstreamModulations.append("n/a")
-                downstreamPowerLevels.append("n/a")
-        elif len(rawElements)==116:
-            #Abbreviated output / Only 1 column of downstream
-            for nRawElement, rawElement in enumerate(rawElements):
-                # print >>textFile, "{}: {}".format(nRawElement,rawElement)
-                if   nRawElement==31:
-                    downstreamChannelIDs.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==43:
-                    downstreamFrequencies.append(rawElement.replace(' Hz&nbsp;',''))
-                elif nRawElement==55:
-                    downstreamSigToNoises.append(rawElement.replace(' dB&nbsp;',''))
-                elif nRawElement==67:
-                    downstreamModulations.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==99:
-                    downstreamPowerLevels.append(rawElement.replace(' dBmV\n&nbsp;',''))
-            for i in range(3):
-                downstreamChannelIDs.append("n/a")
-                downstreamFrequencies.append("n/a")
-                downstreamSigToNoises.append("n/a")
-                downstreamModulations.append("n/a")
-                downstreamPowerLevels.append("n/a")
-        elif len(rawElements)==176:
-            #Healthy output    
-            for nRawElement, rawElement in enumerate(rawElements):
-                # print >>textFile, "{}: {}".format(nRawElement,rawElement)
-                if   nRawElement==31:
-                    downstreamChannelIDs.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==35:
-                    downstreamChannelIDs.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==39:
-                    downstreamChannelIDs.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==43:
-                    downstreamChannelIDs.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==55:
-                    downstreamFrequencies.append(rawElement.replace(' Hz&nbsp;',''))
-                elif nRawElement==59:
-                    downstreamFrequencies.append(rawElement.replace(' Hz&nbsp;',''))
-                elif nRawElement==63:
-                    downstreamFrequencies.append(rawElement.replace(' Hz&nbsp;',''))
-                elif nRawElement==67:
-                    downstreamFrequencies.append(rawElement.replace(' Hz&nbsp;',''))
-                elif nRawElement==79:
-                    downstreamSigToNoises.append(rawElement.replace(' dB&nbsp;',''))
-                elif nRawElement==83:
-                    downstreamSigToNoises.append(rawElement.replace(' dB&nbsp;',''))
-                elif nRawElement==87:
-                    downstreamSigToNoises.append(rawElement.replace(' dB&nbsp;',''))
-                elif nRawElement==91:
-                    downstreamSigToNoises.append(rawElement.replace(' dB&nbsp;',''))
-                elif nRawElement==103:
-                    downstreamModulations.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==107:
-                    downstreamModulations.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==111:
-                    downstreamModulations.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==115:
-                    downstreamModulations.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==147:
-                    downstreamPowerLevels.append(rawElement.replace(' dBmV\n&nbsp;',''))
-                elif nRawElement==151:
-                    downstreamPowerLevels.append(rawElement.replace(' dBmV\n&nbsp;',''))
-                elif nRawElement==155:
-                    downstreamPowerLevels.append(rawElement.replace(' dBmV\n&nbsp;',''))
-                elif nRawElement==159:
-                    downstreamPowerLevels.append(rawElement.replace(' dBmV\n&nbsp;',''))
+def convert_downstream_df_to_list_of_values(downstream_df):
+    """
+    Both the new and old format downstream values look very similar. They are,
+    essentially, 5x4 DataFrames. A small wrinkle is introduced by the HTML
+    formatting, which this function handles.
 
-        else :
-            print >>textFile, "Error: downstream : nD=={}, modemfile=={}".format(len(rawElements),modemFile)
-            continue
-        for downstreamChannelID in downstreamChannelIDs:   
-            lineToAppendToCSV+="{},".format(downstreamChannelID)       
-        for downstreamFrequencie in downstreamFrequencies:   
-            lineToAppendToCSV+="{},".format(downstreamFrequencie)       
-        for downstreamSigToNoise in downstreamSigToNoises:   
-            lineToAppendToCSV+="{},".format(downstreamSigToNoise)       
-        for downstreamModulation in downstreamModulations:   
-            lineToAppendToCSV+="{},".format(downstreamModulation)       
-        for downstreamPowerLevel in downstreamPowerLevels:   
-            lineToAppendToCSV+="{},".format(downstreamPowerLevel)       
+    Args:
+        downstream_df [pd.DataFrame]:
+            A DataFrame taken directly from a call to pd.read_html(filename)[0]
 
-        #parse the Upstream Table
-        #start by breaking the string at every "<" or ">"
-        # (many of these elements will just be HTML tags)
-        rawElements=pElements.split(dataTables[1])
+    Returns:
+        A list of 20 values.
+            Units on physical measurements are stripped -- e.g., 37 dB --> 37
+    """
+    # Fix the offset in the 6th row of the raw dataframe
+    for i in range(1, 5):
+        downstream_df.iloc[5, i] = downstream_df.iloc[5, i + 1]
 
-        if len(rawElements) == 92:
-            # Blank table
-            for i in range(10):
-                upstreamValues.append("n/a")
-        elif len(rawElements) == 120 :
-            for nRawElement, rawElement in enumerate(rawElements):
-#                print >>textFile, "{}: {}".format(nRawElement,rawElement)
-                if   nRawElement==31:
-                    upstreamValues.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==43:
-                    upstreamValues.append(rawElement.replace(' Hz&nbsp;',''))
-                elif nRawElement==55:
-                    upstreamValues.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==67:
-                    upstreamValues.append(rawElement.replace(' Msym/sec&nbsp;',''))
-                elif nRawElement==79:
-                    upstreamValues.append(rawElement.replace(' dBmV&nbsp;',''))
-                elif nRawElement==91:
-                    upstreamModulations=pUpstreamModulations.findall(rawElement)
-                    upstreamModulationsSplit=[]
-                    for upstreamModulation in upstreamModulations:
-                        upstreamModulationsSplit.append(re.search("\[[0-9]\]",upstreamModulation).group())
-                        upstreamModulationsSplit.append(re.search("[0-9]+QAM",upstreamModulation).group())
-                    while len(upstreamModulationsSplit)<4:
-                        upstreamModulationsSplit.append("")
-                    upstreamValues.extend(upstreamModulationsSplit)
-                elif nRawElement==103:
-                    upstreamValues.append(rawElement.replace('&nbsp;',''))
+    downstream_values = downstream_df.iloc[1:6, 1:5].values.flatten()
 
-        else :
-            print >>textFile, "Error: upstream : nD=={}, modemfile=={}".format(len(rawElements),modemFile)
+    # Remove units by dropping anything after a space
+    downstream_values = [val.split(" ")[0] for val in downstream_values]
+
+    return downstream_values
+
+
+def convert_upstream_df_to_list_of_values(upstream_df):
+    """
+    The new and old format upstream values are quite different. The old format
+    is a 8x2 DataFrame, with 7 values of interest to us that get stored in 7
+    columns of the output CSV. (The original CSV format used 10 columns by
+    splitting up the Upstream Modulation row.) The new format is an 8x5
+    DataFrame, with 28 values of interest to be stored in 28 columns.
+
+    Just as in the downstream case, physical units are stripped from values.
+
+    Args:
+        upstream_df [pd.DataFrame]:
+            A DataFrame taken directly from a call to pd.read_html(filename)[2]
+
+    Returns:
+        A list of either 7 or 28 values.
+            Units on physical measurements are stripped -- e.g., 37 dB --> 37
+            Upstream Modulation is split into substrings by whitespace.
+    """
+
+    upstream_values = upstream_df.iloc[1:, 1:].values.flatten("F")
+
+    # Remove units by dropping anything after a space
+    # Avoid dropping anything from the Upstream Modulation row, though.
+    upstream_values = [
+        val.split(" ") if "QAM" not in val else [val]
+        for val in upstream_values
+    ]
+    upstream_values = [item for sublist in upstream_values for item in sublist]
+    upstream_values = [
+        val for val in upstream_values if val not in ["Hz", "Msym/sec", "dBmV"]
+    ]
+
+    return upstream_values
+
+
+def convert_signal_stats_df_to_list_of_values(signal_stats_df):
+    """
+    Both the new and old format signal_stats values look very similar. They are
+    4x4 DataFrames.
+
+    Args:
+        signal_stats_df [pd.DataFrame]:
+            A DataFrame taken directly from a call to pd.read_html(filename)[3]
+
+    Returns:
+        A list of 16 values.
+    """
+
+    signal_stats_values = (
+        signal_stats_df.iloc[1:, 1:].astype(int).values.flatten()
+    )
+
+    return signal_stats_values
+
+
+downstream_columns = [
+    "Downstream: " + col_group + " " + let
+    for col_group in [
+        "Channel ID",
+        "Frequency",
+        "Signal to Noise Ratio",
+        "Downstream Modulation",
+        "Power Level",
+    ]
+    for let in ["A", "B", "C", "D"]
+]
+
+upstream_columns = [
+    "Upstream: " + col_group + " " + let
+    for let in ["A", "B", "C", "D"]
+    for col_group in [
+        "Channel ID",
+        "Frequency",
+        "Ranging Service ID",
+        "Symbol Rate",
+        "Power Level",
+        "Upstream Modulation",
+        "Ranging Status",
+    ]
+]
+
+
+signal_stat_columns = [
+    "Signal Stat: " + col_group + " " + let
+    for col_group in [
+        "Channel ID",
+        "Total Unerrored Codewords",
+        "Total Correctable Codewords",
+        "Total Uncorrectable Codewords",
+    ]
+    for let in ["A", "B", "C", "D"]
+]
+
+# Do something where I chunk by 1000 files at a time, for example.
+chunk_size = 1_000
+for chunk_start in range(0, len(modem_files), chunk_size):
+    new_data = OrderedDict()
+    for column_name in (
+        ["timestamp"]
+        + downstream_columns
+        + upstream_columns
+        + signal_stat_columns
+    ):
+        new_data[column_name] = []
+
+    file_names_ready_for_removal = []
+    for file_name in modem_files[chunk_start : chunk_start + chunk_size]:
+        try:
+            with open(file_name, "r") as f:
+                df_list = pd.read_html(f)
+        except Exception as e:
+            print(f"WARN: Failed to parse {file_name}")
+            print(e)
             continue
 
-        for upstreamValue in upstreamValues:
-            lineToAppendToCSV+="{},".format(upstreamValue)
-
-        #parse the Signal Stats Table
-        #start by breaking the string at every "<" or ">"
-        # (many of these elements will just be HTML tags)
-        rawElements=pElements.split(dataTables[2])
-
-        if len(rawElements)==72:
-            for i in range(4):
-                signalStatsChannelIDs.append("n/a")
-                signalStatsUnerroreds.append("n/a")
-                signalStatsCorrectables.append("n/a")
-                signalStatsUncorrectables.append("n/a")
-                
-        elif len(rawElements)==88:
-            for nRawElement, rawElement in enumerate(rawElements):
-#                print >>textFile, "{}: {}".format(nRawElement,rawElement)
-                if   nRawElement==31:
-                    signalStatsChannelIDs.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==43:
-                    signalStatsUnerroreds.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==55:
-                    signalStatsCorrectables.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==67:
-                    signalStatsUncorrectables.append(rawElement.replace('&nbsp;',''))
-            for i in range(3):
-                signalStatsChannelIDs.append("n/a")
-                signalStatsUnerroreds.append("n/a")
-                signalStatsCorrectables.append("n/a")
-                signalStatsUncorrectables.append("n/a")
-
-        elif len(rawElements)==136:
-            for nRawElement, rawElement in enumerate(rawElements):
-#                print >>textFile, "{}: {}".format(nRawElement,rawElement)
-                if   nRawElement==31:
-                    signalStatsChannelIDs.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==35:
-                    signalStatsChannelIDs.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==39:
-                    signalStatsChannelIDs.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==43:
-                    signalStatsChannelIDs.append(rawElement.replace('&nbsp; ',''))
-                elif nRawElement==55:
-                    signalStatsUnerroreds.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==59:
-                    signalStatsUnerroreds.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==63:
-                    signalStatsUnerroreds.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==67:
-                    signalStatsUnerroreds.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==79:
-                    signalStatsCorrectables.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==83:
-                    signalStatsCorrectables.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==87:
-                    signalStatsCorrectables.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==91:
-                    signalStatsCorrectables.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==103:
-                    signalStatsUncorrectables.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==107:
-                    signalStatsUncorrectables.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==111:
-                    signalStatsUncorrectables.append(rawElement.replace('&nbsp;',''))
-                elif nRawElement==115:
-                    signalStatsUncorrectables.append(rawElement.replace('&nbsp;',''))
-
-        else :
-            print >>textFile, "Error: signalStats : nD=={}, modemfile=={}".format(len(rawElements),modemFile)
+        if list(map(lambda x: x.shape, df_list)) not in [
+            [(8, 6), (1, 1), (8, 2), (5, 5)],  # Old style htm files
+            [(8, 6), (1, 1), (8, 5), (5, 5)],  # New style htm files
+        ]:
+            # df_list is not parseable
             continue
 
-        for signalStatsChannelID in signalStatsChannelIDs:   
-            lineToAppendToCSV+="{},".format(signalStatsChannelID)       
-        for signalStatsUnerrored in signalStatsUnerroreds:   
-            lineToAppendToCSV+="{},".format(signalStatsUnerrored)       
-        for signalStatsCorrectable in signalStatsCorrectables:   
-            lineToAppendToCSV+="{},".format(signalStatsCorrectable)       
-        for signalStatsUncorrectable in signalStatsUncorrectables:   
-            lineToAppendToCSV+="{},".format(signalStatsUncorrectable)       
+        downstream_df = df_list[0]
+        downstream_row = convert_downstream_df_to_list_of_values(downstream_df)
 
-        lineToAppendToCSV=lineToAppendToCSV.replace('\n','')
-        print >>csvFile, lineToAppendToCSV.rstrip(",")
-       
-    finally:
-        f.close()
+        upstream_df = df_list[2]
+        upstream_row = convert_upstream_df_to_list_of_values(upstream_df)
+        if len(upstream_row) == 7:
+            upstream_row.extend([None] * 21)
 
-    os.remove(modemFile)
+        signal_stats_df = df_list[3]
+        signal_stats_row = convert_signal_stats_df_to_list_of_values(
+            signal_stats_df
+        )
+
+        new_data["timestamp"].append(get_timestamp_from_filename(file_name))
+        for (val, name) in zip(downstream_row, downstream_columns):
+            new_data[name].append(val)
+
+        for (val, name) in zip(upstream_row, upstream_columns):
+            new_data[name].append(val)
+
+        for (val, name) in zip(signal_stats_row, signal_stat_columns):
+            new_data[name].append(val)
+
+        file_names_ready_for_removal.append(file_name)
+
+    chunk_df = pd.DataFrame(new_data)
+    chunk_df.to_csv(
+        full_df_filename,
+        mode="a",
+        index=False,
+        header=False,
+        quoting=csv.QUOTE_NONE,
+        quotechar="",
+        escapechar="\\",
+        na_rep="n/a",
+    )
+
+    for rm_file in file_names_ready_for_removal:
+        os.remove(rm_file)
+
 quit()
