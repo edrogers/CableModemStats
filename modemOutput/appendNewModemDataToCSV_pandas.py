@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 """
 A script to take files that are currently on disk, extract the relevant
-content, and append as new rows in a CSV.
+content, and append as new rows in a CSV. After successful extraction,
+the files are then removed.
 """
 
 # This script successfully handles both old and new *.htm file formats
-# and appends their contents to OrderedDicts of lists. These OrderedDicts
-# can be directly converted to a single CSV by pandas, which can output
-# to a CSV file.
+# and appends their contents to OrderedDicts of lists. Once these lists
+# reach 1,000 elements each, the OrderedDict is converted to a pandas
+# DataFrame (shape: (1000, 65)). This is then converted to CSV and
+# appended to the pre-existing CSV.
 #
-# TODO: After I write a convertOldCSVToNewCSV.py script, and convert the
-# already collected data (approx 1.38MM rows) into this new format, I'd
-# like to switch the data collection/normalization cron-job to use this
-# script.
-# Before the transition can occur, I'll need to run a batch job to process
-# the backlog of new format files that never got appended to the
-# pre-existing dataset. That will require a chunked version of this script.
-#
-# TODO: Is the order of column names correct? Seems like its transposed
-# for downstream columns at least
+# NOTE: changes to versions in pandas, lxml, etc may cause changes in
+# the behavior of pd.read_html(). Be sure to sync a new virtualenv to
+# the included Pipfile.loc before using.
 
 import csv
 import os
@@ -26,26 +21,19 @@ import re
 import shutil
 
 from collections import OrderedDict
-from glob import iglob
+from glob import glob
 
 import pandas as pd
 
-OLD_STYLE_FILE = "/home/ed/CMS_data_backup/1464220921.htm"
-NEW_STYLE_FILE = "/home/ed/Documents/CableModemStats/modemOutput/1537722781.htm"
-modem_files = [OLD_STYLE_FILE] + [NEW_STYLE_FILE]
-# modem_files = [NEW_STYLE_FILE]
+full_df_filename = (
+    "/home/ed/Documents/CableModemStats/modemOutput/modemData.converted.csv"
+)
 
-
-full_df_filename = "/home/ed/Documents/CableModemStats/modemOutput/testData.csv"
-shutil.copyfile(full_df_filename+"_bkup", full_df_filename)
-
-# full_df_filename = "/home/ed/Documents/CableModemStats/modemOutput/testData.csv"
-# full_df = pd.read_csv(full_df_filename, quotechar='\0',keep_default_na=False, header=None, low_memory=False)
-
-# modem_files = iglob("/home/ed/Documents/CableModemStats/modemOutput/*.htm")
+modem_files = glob("/home/ed/Documents/CableModemStats/modemOutput/*.htm")
 timestamp_re = re.compile(r"(\d+)")
 
 files_to_remove = []
+
 
 def get_timestamp_from_filename(filename):
     return timestamp_re.findall(filename)[-1]
@@ -66,10 +54,10 @@ def convert_downstream_df_to_list_of_values(downstream_df):
             Units on physical measurements are stripped -- e.g., 37 dB --> 37
     """
     # Fix the offset in the 6th row of the raw dataframe
-    for i in range(1,5):
-        downstream_df.iloc[5,i] = downstream_df.iloc[5,i+1]
+    for i in range(1, 5):
+        downstream_df.iloc[5, i] = downstream_df.iloc[5, i + 1]
 
-    downstream_values = downstream_df.iloc[1:6,1:5].values.flatten()
+    downstream_values = downstream_df.iloc[1:6, 1:5].values.flatten()
 
     # Remove units by dropping anything after a space
     downstream_values = [val.split(" ")[0] for val in downstream_values]
@@ -97,13 +85,18 @@ def convert_upstream_df_to_list_of_values(upstream_df):
             Upstream Modulation is split into substrings by whitespace.
     """
 
-    upstream_values = upstream_df.iloc[1:,1:].values.flatten("F")
+    upstream_values = upstream_df.iloc[1:, 1:].values.flatten("F")
 
     # Remove units by dropping anything after a space
     # Avoid dropping anything from the Upstream Modulation row, though.
-    upstream_values = [val.split(" ") if "QAM" not in val else [val] for val in upstream_values]
+    upstream_values = [
+        val.split(" ") if "QAM" not in val else [val]
+        for val in upstream_values
+    ]
     upstream_values = [item for sublist in upstream_values for item in sublist]
-    upstream_values = [val for val in upstream_values if val not in ["Hz", "Msym/sec", "dBmV"]]
+    upstream_values = [
+        val for val in upstream_values if val not in ["Hz", "Msym/sec", "dBmV"]
+    ]
 
     return upstream_values
 
@@ -120,35 +113,31 @@ def convert_signal_stats_df_to_list_of_values(signal_stats_df):
     Returns:
         A list of 16 values. 
     """
-    
-    signal_stats_values = signal_stats_df.iloc[1:,1:].astype(int).values.flatten()
+
+    signal_stats_values = (
+        signal_stats_df.iloc[1:, 1:].astype(int).values.flatten()
+    )
 
     return signal_stats_values
 
 
-downstream_columns = [ 
-    "Downstream: " + col_group + " " + let for let in [
-        "A", 
-        "B", 
-        "C", 
-        "D",
-    ] for col_group in [
-        "Channel ID", 
+downstream_columns = [
+    "Downstream: " + col_group + " " + let
+    for col_group in [
+        "Channel ID",
         "Frequency",
         "Signal to Noise Ratio",
         "Downstream Modulation",
         "Power Level",
     ]
+    for let in ["A", "B", "C", "D"]
 ]
 
-upstream_columns = [ 
-    "Upstream: " + col_group + " " + let for let in [
-        "A", 
-        "B", 
-        "C", 
-        "D",
-    ] for col_group in [
-        "Channel ID", 
+upstream_columns = [
+    "Upstream: " + col_group + " " + let
+    for let in ["A", "B", "C", "D"]
+    for col_group in [
+        "Channel ID",
         "Frequency",
         "Ranging Service ID",
         "Symbol Rate",
@@ -158,77 +147,85 @@ upstream_columns = [
     ]
 ]
 
-signal_stat_columns = [ 
-    "Signal Stat: " + col_group + " " + let for let in [
-        "A", 
-        "B", 
-        "C", 
-        "D",
-    ] for col_group in [
-        "Channel ID", 
+
+signal_stat_columns = [
+    "Signal Stat: " + col_group + " " + let
+    for col_group in [
+        "Channel ID",
         "Total Unerrored Codewords",
         "Total Correctable Codewords",
         "Total Uncorrectable Codewords",
     ]
+    for let in ["A", "B", "C", "D"]
 ]
 
-new_data = OrderedDict()
-for column_name in (
-        ["timestamp"] + 
-        downstream_columns + 
-        upstream_columns + 
-        signal_stat_columns
-):
-    new_data[column_name] = []
+# Do something where I chunk by 1000 files at a time, for example.
+chunk_size = 1_000
+for chunk_start in range(0, len(modem_files), chunk_size):
+    new_data = OrderedDict()
+    for column_name in (
+        ["timestamp"]
+        + downstream_columns
+        + upstream_columns
+        + signal_stat_columns
+    ):
+        new_data[column_name] = []
 
+    file_names_ready_for_removal = []
+    for file_name in modem_files[chunk_start : chunk_start + chunk_size]:
+        try:
+            with open(file_name, "r") as f:
+                df_list = pd.read_html(f)
+        except Exception as e:
+            print(f"WARN: Failed to parse {file_name}")
+            print(e)
+            continue
 
-for i, filename in enumerate(modem_files):
-    try:
-        with open(filename, "r") as f:
-            df_list = pd.read_html(f)
-    except Exception as e:
-        print("Failed to parse {}: filename".format(filename))
-        print(e)
-        continue
+        if list(map(lambda x: x.shape, df_list)) not in [
+            [(8, 6), (1, 1), (8, 2), (5, 5)],  # Old style htm files
+            [(8, 6), (1, 1), (8, 5), (5, 5)],  # New style htm files
+        ]:
+            # df_list is not parseable
+            continue
 
-    if list(map(lambda x: x.shape, df_list)) not in [
-        [(7, 6), (1, 1), (8, 2), (5, 5)],  # Old style htm files
-        [(7, 6), (1, 1), (8, 5), (5, 5)],  # New style htm files
-    ]:
-        # df_list is not parseable
-        continue
+        downstream_df = df_list[0]
+        downstream_row = convert_downstream_df_to_list_of_values(downstream_df)
 
-    downstream_df = df_list[0]
-    downstream_row = convert_downstream_df_to_list_of_values(downstream_df)
+        upstream_df = df_list[2]
+        upstream_row = convert_upstream_df_to_list_of_values(upstream_df)
+        if len(upstream_row) == 7:
+            upstream_row.extend([None] * 21)
 
-    upstream_df = df_list[2]
-    upstream_row = convert_upstream_df_to_list_of_values(upstream_df)
-    if len(upstream_row) == 7:
-        upstream_row.extend([None]*21)
+        signal_stats_df = df_list[3]
+        signal_stats_row = convert_signal_stats_df_to_list_of_values(
+            signal_stats_df
+        )
 
-    signal_stats_df = df_list[3]
-    signal_stats_row = convert_signal_stats_df_to_list_of_values(signal_stats_df)
+        new_data["timestamp"].append(get_timestamp_from_filename(file_name))
+        for (val, name) in zip(downstream_row, downstream_columns):
+            new_data[name].append(val)
 
-    new_data["timestamp"].append(get_timestamp_from_filename(filename))
-    for (val, name) in zip(downstream_row, downstream_columns):
-        new_data[name].append(val)
+        for (val, name) in zip(upstream_row, upstream_columns):
+            new_data[name].append(val)
 
-    for (val, name) in zip(upstream_row, upstream_columns):
-        new_data[name].append(val)
+        for (val, name) in zip(signal_stats_row, signal_stat_columns):
+            new_data[name].append(val)
 
-    for (val, name) in zip(signal_stats_row, signal_stat_columns):
-        new_data[name].append(val)
+        file_names_ready_for_removal.append(file_name)
 
-# Would be nice to build the DataFrame only from new files, and only append at the *very* end
-full_df = pd.DataFrame(new_data)
-full_df.to_csv(full_df_filename, mode="a", index=False, header=False, quoting=csv.QUOTE_NONE, quotechar="",  escapechar="\\", na_rep="n/a")
+    chunk_df = pd.DataFrame(new_data)
+    chunk_df.to_csv(
+        full_df_filename,
+        mode="a",
+        index=False,
+        header=False,
+        quoting=csv.QUOTE_NONE,
+        quotechar="",
+        escapechar="\\",
+        na_rep="n/a",
+    )
 
-    # full_df = full_df.append(pd.Series(row, index=list(range(len(row)))), ignore_index=True)
-    # files_to_remove.append(filename)
-    # if (i+1) % 10 == 0:
-    #     quit()
-    #     # for rm_file in files_to_remove:
-    #     #     os.remove(rm_file)
-    #     files_to_remove = []
+    for rm_file in file_names_ready_for_removal:
+        os.remove(rm_file)
 
 quit()
