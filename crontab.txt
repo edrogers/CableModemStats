@@ -1,4 +1,4 @@
 *              *   *          *      *    /home/ed/Documents/CableModemStats/downloadStats.sh                       > /dev/null 2>&1
-1              *   *          *      *    /home/ed/.local/share/virtualenvs/CableModemStats-_pWo3KyD/bin/python /home/ed/Documents/CableModemStats/modemOutput/appendNewModemDataToCSV.py > /dev/null 2>&1
+1              *   *          *      *    /home/ed/.pyenv/versions/3.7.3/envs/CableModemStats/bin/python3.7 /home/ed/Documents/CableModemStats/modemOutput/appendNewModemDataToCSV.py > /dev/null 2>&1
 2,17,32,47     *   *          *      *    /home/ed/Documents/CableModemStats/speedTest.sh                           > /dev/null 2>&1
 3              *   *          *      *    /home/ed/Documents/CableModemStats/speeds/appendNewSpeedTestToCSV.py      > /dev/null 2>&1
