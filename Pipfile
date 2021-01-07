@@ -1,5 +1,5 @@
 [packages]
-lxml = "==4.3.0"
+lxml = "==4.6.2"
 pandas = "==0.23.4"
 
 [requires]
